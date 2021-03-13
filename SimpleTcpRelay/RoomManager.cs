@@ -11,6 +11,8 @@ namespace SimpleTcpRelay
 
         private static int AtRoomId = 0;
 
+        private Queue<int> reusableRoomIds = new Queue<int>();
+
         
 
         public class Room
@@ -23,7 +25,8 @@ namespace SimpleTcpRelay
 
             public int GetNextClientId()
             {
-                return atClientId++;
+                int tmp = atClientId++;
+                return tmp;
             }
         }
 
@@ -31,6 +34,9 @@ namespace SimpleTcpRelay
 
         private int GetNextRoomId()
         {
+            if (reusableRoomIds.Count > 0)
+                return reusableRoomIds.Dequeue();
+
             int roomId = AtRoomId++;
             if (AtRoomId > MaxRoomId)
                 AtRoomId = 0;
@@ -44,7 +50,9 @@ namespace SimpleTcpRelay
 
         public int CreateRoom(out int clientId,RelayClient client)
         {
+            
             int roomId = GetNextRoomId();
+            
             Room room = new Room()
             {
                 RoomId = roomId
@@ -53,21 +61,17 @@ namespace SimpleTcpRelay
             room.clients.Add(clientId, client);
             room.HostClientId = clientId;
             rooms.Add(roomId, room);
+            Console.WriteLine("Created room " + roomId + " for client " + clientId);
             return roomId;
         }
 
         public void DestroyRoom(int roomId)
         {
+            Console.WriteLine("Destroying room "+roomId);
             Room room = rooms[roomId];
-            foreach(RelayClient client in room.clients.Values)
-            {
-                if (client.IsStarted)
-                {
-                    //TODO: Send disconnect packet to client
-                    client.Stop();
-                }
-            }
             room.clients.Clear();
+            rooms.Remove(roomId);
+            reusableRoomIds.Enqueue(roomId);
         }
 
         public int AddClientToRoom(RelayClient client,int roomId)

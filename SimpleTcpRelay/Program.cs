@@ -4,13 +4,13 @@ using System.Net.Sockets;
 
 namespace SimpleTcpRelay
 {
-    class Program
+    public class Program
     {
         public static string ListenIPAddress = "0.0.0.0";
         public static int ListenPort = 8765;
 
         public static RoomManager roomManager = new RoomManager();
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
             
             TcpListener listener = new TcpListener(IPAddress.Parse(ListenIPAddress), ListenPort);
