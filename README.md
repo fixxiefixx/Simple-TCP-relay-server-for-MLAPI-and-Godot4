@@ -1,6 +1,8 @@
 # Simple-TCP-relay-server-for-MLAPI
 A simple TCP based relay server and transport for the Unity MLAPI networking library
 
+This relay server was tested with the MLAPI version 12.1.7.
+
 # How to use
 You need to install .Net Core 2.0 to run the relay.
 
