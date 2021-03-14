@@ -43,6 +43,16 @@ namespace SimpleTcpRelay
             return roomId;
         }
 
+        public Room[] GetRooms()
+        {
+            List<Room> roomsToReturn = new List<Room>();
+            foreach(Room room in rooms.Values)
+            {
+                roomsToReturn.Add(room);
+            }
+            return roomsToReturn.ToArray();
+        }
+
         public Room GetRoom(int roomId)
         {
             return rooms[roomId];

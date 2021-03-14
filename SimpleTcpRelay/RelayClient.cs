@@ -46,7 +46,9 @@ namespace SimpleTcpRelay
             DisconnectRemoteClient=9,
             ClientConnected=10,
             ReceiveFromClient=11,
-            ClientDisconnected
+            ClientDisconnected,
+            ListRooms,
+            ListRoomsResponse
         }
 
         public RelayClient(TcpClient tcpClient)
@@ -335,6 +337,34 @@ namespace SimpleTcpRelay
             }
         }
 
+        private void HandleListRooms()
+        {
+            List<int> roomIdsToReturn = new List<int>();
+            RoomManager.Room[] rooms;
+            lock (Program.roomManager)
+            {
+                rooms = Program.roomManager.GetRooms();
+            }
+            foreach(RoomManager.Room room in rooms)
+            {
+                roomIdsToReturn.Add(room.RoomId);
+            }
+
+            using (MemoryStream ms = new MemoryStream())
+            {
+                using (BinaryWriter bw = new BinaryWriter(ms))
+                {
+                    bw.Write((byte)CommandType.ListRoomsResponse);
+                    bw.Write(roomIdsToReturn.Count);
+                    foreach(int roomId in roomIdsToReturn)
+                    {
+                        bw.Write(roomId);
+                    }
+                    SendPacket(ms.ToArray());
+                }
+            }
+        }
+
         private void HandlePacketData(byte[] data)
         {
             //Thread.Sleep(200);//Warning: just for test bad network latency
@@ -382,6 +412,10 @@ namespace SimpleTcpRelay
                         HandlePong();
                     }
                     break;
+                case CommandType.ListRooms:
+                    {
+                        HandleListRooms();
+                    }break;
             }
         }
 

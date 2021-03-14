@@ -33,6 +33,8 @@ class SimpleTcpRelayTransport : Transport
     private volatile int ClientId = -1;
     private string mlapidefaultChannel = "";
     private volatile int connectedRoomId = -1;
+    private volatile Action<int[]> currentListRoomsCallback = null;
+    private volatile int[] listRoomsAnswer = null;
 
     private class RelayEvent
     {
@@ -43,7 +45,7 @@ class SimpleTcpRelayTransport : Transport
         public NetEventType eventType;
     }
 
-    private enum CommandType
+    public enum CommandType
     {
         StartHost = 0,
         StartClient = 1,
@@ -57,7 +59,9 @@ class SimpleTcpRelayTransport : Transport
         DisconnectRemoteClient = 9,
         ClientConnected = 10,
         ReceiveFromClient = 11,
-        ClientDisconnected
+        ClientDisconnected,
+        ListRooms,
+        ListRoomsResponse
     }
 
     public int ConnectedRoomId
@@ -244,6 +248,12 @@ class SimpleTcpRelayTransport : Transport
         SendPong();
     }
 
+    private void HandleListRoomsResponse(int[] roomIds)
+    {
+        Debug.Log("HandleListRooms response called");
+        listRoomsAnswer = roomIds;
+    }
+
     private void HandlePacketData(byte[] data)
     {
         CommandType cmdType = (CommandType)data[4];
@@ -289,6 +299,16 @@ class SimpleTcpRelayTransport : Transport
             case CommandType.Ping:
                 {
                     HandlePing();
+                }break;
+            case CommandType.ListRoomsResponse:
+                {
+                    int roomIdCount = BitConverter.ToInt32(data, 5);
+                    int[] roomIds = new int[roomIdCount];
+                    for(int i=0;i<roomIdCount;i++)
+                    {
+                        roomIds[i] = BitConverter.ToInt32(data, 9 + (i * sizeof(int)));
+                    }
+                    HandleListRoomsResponse(roomIds);
                 }break;
             default:
                 {
@@ -427,7 +447,10 @@ class SimpleTcpRelayTransport : Transport
     private void StartSocket()
     {
         if (started)
-            throw new Exception("SimpleTcpRelayTransport already started");
+        {
+            //throw new Exception("SimpleTcpRelayTransport already started");
+            return;
+        }
         started = true;
         tcpClient = new TcpClient(IpAddress, Port);
         sendThreadRunning = true;
@@ -449,6 +472,18 @@ class SimpleTcpRelayTransport : Transport
         tcpClient.Dispose();
         tcpClient = null;
         started = false;
+    }
+
+    private void SendListRooms()
+    {
+        SendPacket(BitConverter.GetBytes((byte)CommandType.ListRooms));
+    }
+
+    public void ListRooms(Action<int[]> listRoomsCallback)
+    {
+        StartSocket();
+        currentListRoomsCallback = listRoomsCallback;
+        SendListRooms();
     }
 
     public override void Send(ulong clientId, ArraySegment<byte> data, string channelName)
@@ -547,6 +582,13 @@ class SimpleTcpRelayTransport : Transport
     private void Update()
     {
         timeSinceStartup = Time.realtimeSinceStartup;
+        if(listRoomsAnswer!=null && currentListRoomsCallback!=null)
+        {
+            currentListRoomsCallback.Invoke(listRoomsAnswer);
+            listRoomsAnswer = null;
+            currentListRoomsCallback = null;
+        }
+
     }
 
     public override ulong ServerClientId { get { return hostClientId; } }
