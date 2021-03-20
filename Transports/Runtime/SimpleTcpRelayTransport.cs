@@ -103,6 +103,15 @@ class SimpleTcpRelayTransport : Transport
 
     private void HandleDisconnect()
     {
+        Debug.Log("HandleDisconnect ClientId = "+ClientId);
+
+        if (connectTask != null)
+        {
+            connectTask.Tasks[0].Success = false;
+            connectTask.Tasks[0].IsDone = true;
+            connectTask = null;
+        }
+
         if (ClientId != -1)
         {
             RelayEvent re = new RelayEvent()
@@ -129,6 +138,7 @@ class SimpleTcpRelayTransport : Transport
 
     private void HandleStartClientResponse(int clientId, int hostClientId)
     {
+        Debug.Log("HandleStartClientResponse clientId = " + clientId + " hostClientId = " + hostClientId);
         if (connectTask != null)
         {
             this.ClientId = clientId;
@@ -141,9 +151,9 @@ class SimpleTcpRelayTransport : Transport
                 receiveTime = timeSinceStartup,
                 eventType = NetEventType.Connect
             };
-            connectTask.Tasks[0].Success = true;
+            /*connectTask.Tasks[0].Success = true;
             connectTask.Tasks[0].IsDone = true;
-            connectTask = null;
+            connectTask = null;*/
             lock (receivedEvents)
             {
                 receivedEvents.Enqueue(re);
@@ -177,6 +187,13 @@ class SimpleTcpRelayTransport : Transport
 
     private void HandleReceiveFromClient(int fromClientId, byte channelId,ArraySegment<byte> payload)
     {
+        if (connectTask != null)
+        {
+            connectTask.Tasks[0].Success = true;
+            connectTask.Tasks[0].IsDone = true;
+            connectTask = null;
+        }
+
         RelayEvent re = new RelayEvent()
         {
             ChannelName = channelIdToName[channelId],
@@ -195,6 +212,7 @@ class SimpleTcpRelayTransport : Transport
 
     private void HandleClientDisconnected(int remoteClientId)
     {
+        Debug.Log("HandleClientDisconnected remoteClientId = "+remoteClientId);
         RelayEvent re = new RelayEvent()
         {
             ChannelName = mlapidefaultChannel,
@@ -398,7 +416,8 @@ class SimpleTcpRelayTransport : Transport
         catch (Exception ex)
         {
             Debug.Log("Exception in receiveThread loop: " + ex.ToString());
-            StopSocket();
+            HandleDisconnect();
+            //StopSocket();
         }
     }
 
@@ -529,6 +548,10 @@ class SimpleTcpRelayTransport : Transport
 
     public override SocketTasks StartClient()
     {
+        lock(receivedEvents)
+        {
+            receivedEvents.Clear();
+        }
         IsHost = false;
         connectTask = SocketTask.Working.AsTasks();
         StartSocket();
@@ -538,6 +561,10 @@ class SimpleTcpRelayTransport : Transport
 
     public override SocketTasks StartServer()
     {
+        lock (receivedEvents)
+        {
+            receivedEvents.Clear();
+        }
         IsHost = true;
         connectTask = SocketTask.Working.AsTasks();
         StartSocket();
@@ -567,6 +594,10 @@ class SimpleTcpRelayTransport : Transport
             StopSocket();
         channelIdToName.Clear();
         channelNameToId.Clear();
+        lock (receivedEvents)
+        {
+            receivedEvents.Clear();
+        }
     }
 
     public override void Init()
