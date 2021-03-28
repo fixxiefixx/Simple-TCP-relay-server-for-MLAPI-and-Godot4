@@ -48,7 +48,8 @@ namespace SimpleTcpRelay
             ReceiveFromClient=11,
             ClientDisconnected,
             ListRooms,
-            ListRoomsResponse
+            ListRoomsResponse,
+            SetRoomVisible//only From Host
         }
 
         public RelayClient(TcpClient tcpClient)
@@ -168,7 +169,7 @@ namespace SimpleTcpRelay
             }
         }           
 
-        private void HandleStartHost()
+        private void HandleStartHost(string password, string name)
         {
             if (ClientId != -1)
                 throw new Exception("Client is already in a room");
@@ -176,7 +177,7 @@ namespace SimpleTcpRelay
             lock(Program.roomManager)
             {
                 int clientIdret;
-                ConnectedRoomId = Program.roomManager.CreateRoom(out clientIdret, this);
+                ConnectedRoomId = Program.roomManager.CreateRoom(out clientIdret, this, password, name);
                 ClientId = clientIdret;
                 SendStartHostResponse(ClientId, ConnectedRoomId);
             }
@@ -231,16 +232,23 @@ namespace SimpleTcpRelay
             }
         }
 
-        private void HandleStartClient(int roomId)
+        private void HandleStartClient(int roomId, string password)
         {
             ConnectedRoomId = roomId;
             lock(Program.roomManager)
             {
                 RoomManager.Room room = Program.roomManager.GetRoom(roomId);
-                ClientId = Program.roomManager.AddClientToRoom(this, roomId);
-                RelayClient hostClient = room.clients[room.HostClientId];
-                hostClient.SendClientConnected(ClientId);
-                SendStartClientResponse(ClientId, room.HostClientId);
+                if (room.Password == password)
+                {
+                    ClientId = Program.roomManager.AddClientToRoom(this, roomId);
+                    RelayClient hostClient = room.clients[room.HostClientId];
+                    hostClient.SendClientConnected(ClientId);
+                    SendStartClientResponse(ClientId, room.HostClientId);
+                }else
+                {
+                    Console.WriteLine("Client connected with wrong password");
+                    HandleDisconnect();
+                }
             }
         }
 
@@ -302,6 +310,7 @@ namespace SimpleTcpRelay
                     else
                     {
                         RelayClient hostClient = room.clients[room.HostClientId];
+                        room.clients.Remove(ClientId);
                         hostClient.SendClientDisconnected(ClientId);
                         clientsToStop.Add(this);
                     }
@@ -339,30 +348,47 @@ namespace SimpleTcpRelay
 
         private void HandleListRooms()
         {
-            List<int> roomIdsToReturn = new List<int>();
+            List<RoomManager.Room> roomsToReturn = new List<RoomManager.Room>();
             RoomManager.Room[] rooms;
             lock (Program.roomManager)
             {
                 rooms = Program.roomManager.GetRooms();
-            }
-            foreach(RoomManager.Room room in rooms)
-            {
-                roomIdsToReturn.Add(room.RoomId);
-            }
 
-            using (MemoryStream ms = new MemoryStream())
-            {
-                using (BinaryWriter bw = new BinaryWriter(ms))
+                foreach (RoomManager.Room room in rooms)
                 {
-                    bw.Write((byte)CommandType.ListRoomsResponse);
-                    bw.Write(roomIdsToReturn.Count);
-                    foreach(int roomId in roomIdsToReturn)
+                    if(room.Visible)
+                        roomsToReturn.Add(room);
+                }
+
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    using (BinaryWriter bw = new BinaryWriter(ms))
                     {
-                        bw.Write(roomId);
+                        bw.Write((byte)CommandType.ListRoomsResponse);
+                        bw.Write(roomsToReturn.Count);
+                        foreach (RoomManager.Room room in roomsToReturn)
+                        {
+                            bw.Write(room.RoomId);
+                            bw.Write(room.clients.Count);
+                            bw.Write(room.Password != "");
+                            bw.Write(room.Name);
+                        }
+                        SendPacket(ms.ToArray());
                     }
-                    SendPacket(ms.ToArray());
                 }
             }
+        }
+
+        private void HandleSetRoomVisible(bool visible)
+        {
+            if (!IsHost)
+                return;
+            lock (Program.roomManager)
+            {
+                RoomManager.Room room = Program.roomManager.GetRoom(ConnectedRoomId);
+                room.Visible = visible;
+            }
+
         }
 
         private void HandlePacketData(byte[] data)
@@ -378,7 +404,17 @@ namespace SimpleTcpRelay
             {
                 case CommandType.StartHost:
                     {
-                        HandleStartHost();
+                        using(MemoryStream ms = new MemoryStream(data))
+                        {
+                            ms.Seek(5, SeekOrigin.Begin);
+                            using(BinaryReader br=new BinaryReader(ms))
+                            {
+                                string password = br.ReadString();
+                                string name = br.ReadString();
+                                HandleStartHost(password,name);
+                            }
+                        }
+                        
                     }break;
                 case CommandType.Ping:
                     {
@@ -386,8 +422,16 @@ namespace SimpleTcpRelay
                     }break;
                 case CommandType.StartClient:
                     {
-                        int roomId = BitConverter.ToInt32(data, 5);
-                        HandleStartClient(roomId);
+                        using (MemoryStream ms = new MemoryStream(data))
+                        {
+                            ms.Seek(5, SeekOrigin.Begin);
+                            using (BinaryReader br = new BinaryReader(ms))
+                            {
+                                int roomId = br.ReadInt32();
+                                string password = br.ReadString();
+                                HandleStartClient(roomId,password);
+                            }
+                        }
                     }break;
                 case CommandType.SendToClient:
                     {
@@ -415,6 +459,11 @@ namespace SimpleTcpRelay
                 case CommandType.ListRooms:
                     {
                         HandleListRooms();
+                    }break;
+                case CommandType.SetRoomVisible:
+                    {
+                        bool visible = BitConverter.ToBoolean(data, 5);
+                        HandleSetRoomVisible(visible);
                     }break;
             }
         }

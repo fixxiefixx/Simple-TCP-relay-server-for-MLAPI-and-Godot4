@@ -21,6 +21,10 @@ namespace SimpleTcpRelay
 
             public int RoomId = -1;
             public int HostClientId = -1;
+            public string Password = "";
+            public string Name = "";
+            public bool Visible = true;
+
             public Dictionary<int, RelayClient> clients = new Dictionary<int, RelayClient>();
 
             public int GetNextClientId()
@@ -58,14 +62,17 @@ namespace SimpleTcpRelay
             return rooms[roomId];
         }
 
-        public int CreateRoom(out int clientId,RelayClient client)
+        public int CreateRoom(out int clientId,RelayClient client, string password, string name)
         {
             
             int roomId = GetNextRoomId();
             
             Room room = new Room()
             {
-                RoomId = roomId
+                RoomId = roomId,
+                Password = password,
+                Name = name
+                
             };
             clientId = room.GetNextClientId();
             room.clients.Add(clientId, client);

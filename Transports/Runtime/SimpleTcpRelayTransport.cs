@@ -8,11 +8,13 @@ using System.Net.Sockets;
 using System.Threading;
 using UnityEngine;
 
-class SimpleTcpRelayTransport : Transport
+public class SimpleTcpRelayTransport : Transport
 {
     public string IpAddress = "127.0.0.1";
     public int Port = 8765;
     public int RoomIdToConnect = 0;
+    public string RoomPassword = "";
+    public string RoomNameToCreate = "";
 
     private const int RECEIVE_BUFFER_SIZE = 1024;
 
@@ -33,8 +35,9 @@ class SimpleTcpRelayTransport : Transport
     private volatile int ClientId = -1;
     private string mlapidefaultChannel = "";
     private volatile int connectedRoomId = -1;
-    private volatile Action<int[]> currentListRoomsCallback = null;
-    private volatile int[] listRoomsAnswer = null;
+    private volatile Action<RoomInfo[]> currentListRoomsCallback = null;
+    private volatile RoomInfo[] listRoomsAnswer = null;
+    private object startStopClientLock = new object();
 
     private class RelayEvent
     {
@@ -43,6 +46,14 @@ class SimpleTcpRelayTransport : Transport
         public ArraySegment<byte> payload;
         public float receiveTime;
         public NetEventType eventType;
+    }
+
+    public class RoomInfo
+    {
+        public int RoomId = 0;
+        public int ClientCount = 0;
+        public bool HasPassword = false;
+        public string Name = "";
     }
 
     public enum CommandType
@@ -61,7 +72,8 @@ class SimpleTcpRelayTransport : Transport
         ReceiveFromClient = 11,
         ClientDisconnected,
         ListRooms,
-        ListRoomsResponse
+        ListRoomsResponse,
+        SetRoomVisible//only From Host
     }
 
     public int ConnectedRoomId
@@ -97,8 +109,8 @@ class SimpleTcpRelayTransport : Transport
         catch (Exception ex)
         {
             Debug.Log("Exception in sendThread loop: " + ex.ToString());
-            HandleDisconnect();
         }
+        HandleDisconnect();
     }
 
     private void HandleDisconnect()
@@ -110,6 +122,18 @@ class SimpleTcpRelayTransport : Transport
             connectTask.Tasks[0].Success = false;
             connectTask.Tasks[0].IsDone = true;
             connectTask = null;
+        }
+
+        
+        lock (startStopClientLock)
+        {
+            if (started)
+            {
+                started = false;
+                tcpClient.Dispose();
+                tcpClient = null;
+                
+            }
         }
 
         if (ClientId != -1)
@@ -127,12 +151,6 @@ class SimpleTcpRelayTransport : Transport
                 receivedEvents.Enqueue(re);
             }
             ClientId = -1;
-        }
-        if (started)
-        {
-            tcpClient.Dispose();
-            tcpClient = null;
-            started = false;
         }
     }
 
@@ -266,10 +284,10 @@ class SimpleTcpRelayTransport : Transport
         SendPong();
     }
 
-    private void HandleListRoomsResponse(int[] roomIds)
+    private void HandleListRoomsResponse(RoomInfo[] roomInfos)
     {
         Debug.Log("HandleListRooms response called");
-        listRoomsAnswer = roomIds;
+        listRoomsAnswer = roomInfos;
     }
 
     private void HandlePacketData(byte[] data)
@@ -321,12 +339,26 @@ class SimpleTcpRelayTransport : Transport
             case CommandType.ListRoomsResponse:
                 {
                     int roomIdCount = BitConverter.ToInt32(data, 5);
-                    int[] roomIds = new int[roomIdCount];
-                    for(int i=0;i<roomIdCount;i++)
+                    using (MemoryStream ms = new MemoryStream(data))
                     {
-                        roomIds[i] = BitConverter.ToInt32(data, 9 + (i * sizeof(int)));
+                        ms.Seek(9, SeekOrigin.Begin);
+                        using (BinaryReader br = new BinaryReader(ms))
+                        {
+                            RoomInfo[] roomInfos = new RoomInfo[roomIdCount];
+                            for (int i = 0; i < roomIdCount; i++)
+                            {
+                                roomInfos[i] = new RoomInfo()
+                                {
+                                    RoomId = br.ReadInt32(),
+                                    ClientCount = br.ReadInt32(),
+                                    HasPassword = br.ReadBoolean(),
+                                    Name = br.ReadString()
+                                };
+                            }
+                            HandleListRoomsResponse(roomInfos);
+                        }
                     }
-                    HandleListRoomsResponse(roomIds);
+                    
                 }break;
             default:
                 {
@@ -416,12 +448,13 @@ class SimpleTcpRelayTransport : Transport
         catch (Exception ex)
         {
             Debug.Log("Exception in receiveThread loop: " + ex.ToString());
-            HandleDisconnect();
+            
             //StopSocket();
         }
+        HandleDisconnect();
     }
 
-    private void SendStartClient(int roomId)
+    private void SendStartClient(int roomId, string password)
     {
         using (MemoryStream ms = new MemoryStream())
         {
@@ -429,18 +462,21 @@ class SimpleTcpRelayTransport : Transport
             {
                 bw.Write((byte)CommandType.StartClient);
                 bw.Write(roomId);
+                bw.Write(password);
                 SendPacket(ms.ToArray());
             }
         }
     }
 
-    private void SendStartHost()
+    private void SendStartHost(string password, string name)
     {
         using (MemoryStream ms = new MemoryStream())
         {
             using (BinaryWriter bw = new BinaryWriter(ms))
             {
                 bw.Write((byte)CommandType.StartHost);
+                bw.Write(password);
+                bw.Write(name);
                 SendPacket(ms.ToArray());
             }
         }
@@ -470,27 +506,43 @@ class SimpleTcpRelayTransport : Transport
             //throw new Exception("SimpleTcpRelayTransport already started");
             return;
         }
-        started = true;
-        tcpClient = new TcpClient(IpAddress, Port);
-        sendThreadRunning = true;
-        sendThread = new Thread(sendThreadFunc);
-        sendThread.IsBackground = true;
-        sendThread.Start();
+        lock (startStopClientLock)
+        {
+            started = true;
+            try
+            {
+                tcpClient = new TcpClient(IpAddress, Port);
+            }
+            catch
+            {
+                return;
+            }
+            sendThreadRunning = true;
+            sendThread = new Thread(sendThreadFunc);
+            sendThread.IsBackground = true;
+            sendThread.Start();
 
-        receiveThread = new Thread(receiveThreadFunc);
-        receiveThread.IsBackground = true;
-        receiveThread.Start();
+            receiveThread = new Thread(receiveThreadFunc);
+            receiveThread.IsBackground = true;
+            receiveThread.Start();
+        }
     }
 
     private void StopSocket()
     {
-        if (!started)
-            return;
-        sendThreadRunning = false;
-        tcpClient.Close();
-        tcpClient.Dispose();
-        tcpClient = null;
-        started = false;
+        lock (startStopClientLock)
+        {
+            if (!started)
+                return;
+            started = false;
+            sendThreadRunning = false;
+            if (tcpClient != null)
+            {
+                tcpClient.Close();
+                tcpClient.Dispose();
+                tcpClient = null;
+            }
+        }
     }
 
     private void SendListRooms()
@@ -498,11 +550,30 @@ class SimpleTcpRelayTransport : Transport
         SendPacket(BitConverter.GetBytes((byte)CommandType.ListRooms));
     }
 
-    public void ListRooms(Action<int[]> listRoomsCallback)
+    private void SendSetRoomVisible(bool visible)
     {
+        using (MemoryStream ms = new MemoryStream())
+        {
+            using (BinaryWriter bw = new BinaryWriter(ms))
+            {
+                bw.Write((byte)CommandType.SetRoomVisible);
+                bw.Write(visible);
+                SendPacket(ms.ToArray());
+            }
+        }
+    }
+
+    public void ListRooms(Action<RoomInfo[]> listRoomsCallback)
+    {
+        Debug.Log("ListRooms called");
         StartSocket();
         currentListRoomsCallback = listRoomsCallback;
         SendListRooms();
+    }
+
+    public void SetRoomVisible(bool visible)
+    {
+        SendSetRoomVisible(visible);
     }
 
     public override void Send(ulong clientId, ArraySegment<byte> data, string channelName)
@@ -555,7 +626,7 @@ class SimpleTcpRelayTransport : Transport
         IsHost = false;
         connectTask = SocketTask.Working.AsTasks();
         StartSocket();
-        SendStartClient(RoomIdToConnect);
+        SendStartClient(RoomIdToConnect, RoomPassword);
         return connectTask;
     }
 
@@ -568,7 +639,7 @@ class SimpleTcpRelayTransport : Transport
         IsHost = true;
         connectTask = SocketTask.Working.AsTasks();
         StartSocket();
-        SendStartHost();
+        SendStartHost(RoomPassword, RoomNameToCreate);
         return connectTask;
     }
 
@@ -602,12 +673,15 @@ class SimpleTcpRelayTransport : Transport
 
     public override void Init()
     {
-        for (byte i = 0; i < MLAPI_CHANNELS.Length; i++)
+        if (channelIdToName.Count == 0)
         {
-            channelIdToName.Add(i, MLAPI_CHANNELS[i].Name);
-            channelNameToId.Add(MLAPI_CHANNELS[i].Name, i);
+            for (byte i = 0; i < MLAPI_CHANNELS.Length; i++)
+            {
+                channelIdToName.Add(i, MLAPI_CHANNELS[i].Name);
+                channelNameToId.Add(MLAPI_CHANNELS[i].Name, i);
+            }
+            mlapidefaultChannel = channelIdToName[0];
         }
-        mlapidefaultChannel = channelIdToName[0];
     }
 
     private void Update()
