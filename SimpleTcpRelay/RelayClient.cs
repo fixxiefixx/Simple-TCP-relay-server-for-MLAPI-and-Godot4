@@ -25,7 +25,7 @@ namespace SimpleTcpRelay
         private AutoResetEvent sendWaitHandle = new AutoResetEvent(false);
 
         public volatile int ClientId = -1;
-        public volatile int ConnectedRoomId = -1;
+        public volatile string ConnectedRoomId = null;
         private volatile bool stopped = false;
         public volatile bool IsHost = false;
 
@@ -154,7 +154,7 @@ namespace SimpleTcpRelay
             }
         }
 
-        private void SendStartHostResponse(int ClientId,int roomId)
+        private void SendStartHostResponse(int ClientId,string roomId)
         {
             using (MemoryStream ms = new MemoryStream())
             {
@@ -169,7 +169,7 @@ namespace SimpleTcpRelay
             }
         }           
 
-        private void HandleStartHost(string password, string name)
+        private void HandleStartHost(string password, string name, string gameName)
         {
             if (ClientId != -1)
                 throw new Exception("Client is already in a room");
@@ -177,7 +177,7 @@ namespace SimpleTcpRelay
             lock(Program.roomManager)
             {
                 int clientIdret;
-                ConnectedRoomId = Program.roomManager.CreateRoom(out clientIdret, this, password, name);
+                ConnectedRoomId = Program.roomManager.CreateRoom(out clientIdret, this, password, name, gameName);
                 ClientId = clientIdret;
                 SendStartHostResponse(ClientId, ConnectedRoomId);
             }
@@ -232,7 +232,7 @@ namespace SimpleTcpRelay
             }
         }
 
-        private void HandleStartClient(int roomId, string password)
+        private void HandleStartClient(string roomId, string password)
         {
             ConnectedRoomId = roomId;
             lock(Program.roomManager)
@@ -288,7 +288,7 @@ namespace SimpleTcpRelay
 
         private void HandleDisconnect()
         {
-            if(!disconnected && ConnectedRoomId != -1)
+            if(!disconnected && ConnectedRoomId != null)
             {
                 disconnected = true;
                 List<RelayClient> clientsToStop = new List<RelayClient>();
@@ -314,7 +314,7 @@ namespace SimpleTcpRelay
                         hostClient.SendClientDisconnected(ClientId);
                         clientsToStop.Add(this);
                     }
-                    ConnectedRoomId = -1;
+                    ConnectedRoomId = null;
                 }
 
                 if (clientsToStop.Count > 0)
@@ -346,7 +346,7 @@ namespace SimpleTcpRelay
             }
         }
 
-        private void HandleListRooms()
+        private void HandleListRooms(string gameName)
         {
             List<RoomManager.Room> roomsToReturn = new List<RoomManager.Room>();
             RoomManager.Room[] rooms;
@@ -356,7 +356,7 @@ namespace SimpleTcpRelay
 
                 foreach (RoomManager.Room room in rooms)
                 {
-                    if(room.Visible)
+                    if(room.Visible && room.GameName == gameName)
                         roomsToReturn.Add(room);
                 }
 
@@ -411,7 +411,8 @@ namespace SimpleTcpRelay
                             {
                                 string password = br.ReadString();
                                 string name = br.ReadString();
-                                HandleStartHost(password,name);
+                                string gameName = br.ReadString();
+                                HandleStartHost(password,name,gameName);
                             }
                         }
                         
@@ -427,7 +428,7 @@ namespace SimpleTcpRelay
                             ms.Seek(5, SeekOrigin.Begin);
                             using (BinaryReader br = new BinaryReader(ms))
                             {
-                                int roomId = br.ReadInt32();
+                                string roomId = br.ReadString();
                                 string password = br.ReadString();
                                 HandleStartClient(roomId,password);
                             }
@@ -458,7 +459,15 @@ namespace SimpleTcpRelay
                     break;
                 case CommandType.ListRooms:
                     {
-                        HandleListRooms();
+                        using (MemoryStream ms = new MemoryStream(data))
+                        {
+                            ms.Seek(5, SeekOrigin.Begin);
+                            using (BinaryReader br = new BinaryReader(ms))
+                            {
+                                string gameName = br.ReadString();
+                                HandleListRooms(gameName);
+                            }
+                        }
                     }break;
                 case CommandType.SetRoomVisible:
                     {

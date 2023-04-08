@@ -12,9 +12,10 @@ public class SimpleTcpRelayTransport : Transport
 {
     public string IpAddress = "127.0.0.1";
     public int Port = 8765;
-    public int RoomIdToConnect = 0;
+    public string RoomIdToConnect = "";
     public string RoomPassword = "";
     public string RoomNameToCreate = "";
+    public string GameName = "ExampleGame";
 
     private const int RECEIVE_BUFFER_SIZE = 1024;
 
@@ -50,7 +51,7 @@ public class SimpleTcpRelayTransport : Transport
 
     public class RoomInfo
     {
-        public int RoomId = 0;
+        public string RoomId = "";
         public int ClientCount = 0;
         public bool HasPassword = false;
         public string Name = "";
@@ -349,7 +350,7 @@ public class SimpleTcpRelayTransport : Transport
                             {
                                 roomInfos[i] = new RoomInfo()
                                 {
-                                    RoomId = br.ReadInt32(),
+                                    RoomId = br.ReadString(),
                                     ClientCount = br.ReadInt32(),
                                     HasPassword = br.ReadBoolean(),
                                     Name = br.ReadString()
@@ -454,7 +455,7 @@ public class SimpleTcpRelayTransport : Transport
         HandleDisconnect();
     }
 
-    private void SendStartClient(int roomId, string password)
+    private void SendStartClient(string roomId, string password)
     {
         using (MemoryStream ms = new MemoryStream())
         {
@@ -468,7 +469,7 @@ public class SimpleTcpRelayTransport : Transport
         }
     }
 
-    private void SendStartHost(string password, string name)
+    private void SendStartHost(string password, string name, string gameName)
     {
         using (MemoryStream ms = new MemoryStream())
         {
@@ -477,6 +478,7 @@ public class SimpleTcpRelayTransport : Transport
                 bw.Write((byte)CommandType.StartHost);
                 bw.Write(password);
                 bw.Write(name);
+                bw.Write(gameName);
                 SendPacket(ms.ToArray());
             }
         }
@@ -545,9 +547,17 @@ public class SimpleTcpRelayTransport : Transport
         }
     }
 
-    private void SendListRooms()
+    private void SendListRooms(string gameName)
     {
-        SendPacket(BitConverter.GetBytes((byte)CommandType.ListRooms));
+        using (MemoryStream ms = new MemoryStream())
+        {
+            using (BinaryWriter bw = new BinaryWriter(ms))
+            {
+                bw.Write((byte)CommandType.ListRooms);
+                bw.Write(gameName);
+                SendPacket(ms.ToArray());
+            }
+        }
     }
 
     private void SendSetRoomVisible(bool visible)
@@ -568,7 +578,7 @@ public class SimpleTcpRelayTransport : Transport
         Debug.Log("ListRooms called");
         StartSocket();
         currentListRoomsCallback = listRoomsCallback;
-        SendListRooms();
+        SendListRooms(GameName);
     }
 
     public void SetRoomVisible(bool visible)
@@ -639,7 +649,7 @@ public class SimpleTcpRelayTransport : Transport
         IsHost = true;
         connectTask = SocketTask.Working.AsTasks();
         StartSocket();
-        SendStartHost(RoomPassword, RoomNameToCreate);
+        SendStartHost(RoomPassword, RoomNameToCreate,GameName);
         return connectTask;
     }
 

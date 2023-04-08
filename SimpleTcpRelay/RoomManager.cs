@@ -7,19 +7,12 @@ namespace SimpleTcpRelay
 {
     public class RoomManager
     {
-        private const int MaxRoomId = 1000;
-
-        private static int AtRoomId = 0;
-
-        private Queue<int> reusableRoomIds = new Queue<int>();
-
-        
-
         public class Room
         {
             private int atClientId = 0;
 
-            public int RoomId = -1;
+            public string RoomId = null;
+            public string GameName = null;
             public int HostClientId = -1;
             public string Password = "";
             public string Name = "";
@@ -34,17 +27,12 @@ namespace SimpleTcpRelay
             }
         }
 
-        private Dictionary<int, Room> rooms = new Dictionary<int, Room>();
+        private Dictionary<string, Room> rooms = new Dictionary<string, Room>();
 
-        private int GetNextRoomId()
+        private string GetNextRoomId()
         {
-            if (reusableRoomIds.Count > 0)
-                return reusableRoomIds.Dequeue();
 
-            int roomId = AtRoomId++;
-            if (AtRoomId > MaxRoomId)
-                AtRoomId = 0;
-            return roomId;
+            return Guid.NewGuid().ToString();
         }
 
         public Room[] GetRooms()
@@ -57,22 +45,22 @@ namespace SimpleTcpRelay
             return roomsToReturn.ToArray();
         }
 
-        public Room GetRoom(int roomId)
+        public Room GetRoom(string roomId)
         {
             return rooms[roomId];
         }
 
-        public int CreateRoom(out int clientId,RelayClient client, string password, string name)
+        public string CreateRoom(out int clientId,RelayClient client, string password, string name, string gameName)
         {
             
-            int roomId = GetNextRoomId();
+            string roomId = GetNextRoomId();
             
             Room room = new Room()
             {
                 RoomId = roomId,
                 Password = password,
-                Name = name
-                
+                Name = name,
+                GameName = gameName
             };
             clientId = room.GetNextClientId();
             room.clients.Add(clientId, client);
@@ -82,16 +70,15 @@ namespace SimpleTcpRelay
             return roomId;
         }
 
-        public void DestroyRoom(int roomId)
+        public void DestroyRoom(string roomId)
         {
             Console.WriteLine("Destroying room "+roomId);
             Room room = rooms[roomId];
             room.clients.Clear();
             rooms.Remove(roomId);
-            reusableRoomIds.Enqueue(roomId);
         }
 
-        public int AddClientToRoom(RelayClient client,int roomId)
+        public int AddClientToRoom(RelayClient client,string roomId)
         {
             Room room = rooms[roomId];
             int clientId = room.GetNextClientId();
