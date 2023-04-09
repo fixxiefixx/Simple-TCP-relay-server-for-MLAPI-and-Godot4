@@ -49,7 +49,8 @@ namespace SimpleTcpRelay
             ClientDisconnected,
             ListRooms,
             ListRoomsResponse,
-            SetRoomVisible//only From Host
+            SetRoomVisible,//only From Host
+            SendToMultipleClients
         }
 
         public RelayClient(TcpClient tcpClient)
@@ -273,6 +274,29 @@ namespace SimpleTcpRelay
             }
         }
 
+        private void HandleSendToMultipleClients(int[] toClientIds, byte channelId, byte[] payload)
+        {
+            lock (Program.roomManager)
+            {
+                RoomManager.Room room = Program.roomManager.GetRoom(ConnectedRoomId);
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    using (BinaryWriter bw = new BinaryWriter(ms))
+                    {
+                        bw.Write((byte)CommandType.ReceiveFromClient);
+                        bw.Write(ClientId);
+                        bw.Write(channelId);
+                        bw.Write(payload);
+                        foreach (int toClientId in toClientIds)
+                        {
+                            RelayClient targetClient = room.clients[toClientId];
+                            targetClient.SendPacket(ms.ToArray());
+                        }
+                    }
+                }
+            }
+        }
+
         public void SendClientDisconnected(int clientId)
         {
             using (MemoryStream ms = new MemoryStream())
@@ -395,7 +419,8 @@ namespace SimpleTcpRelay
         {
             //Thread.Sleep(200);//Warning: just for test bad network latency
             CommandType cmdType = (CommandType)data[4];
-            if (cmdType != CommandType.SendToClient && cmdType != CommandType.Pong)
+            if (cmdType != CommandType.SendToClient && cmdType != CommandType.Pong
+                && cmdType != CommandType.SendToMultipleClients)
             {
                 Console.WriteLine("Received command " + cmdType.ToString() + " from Client " + ClientId);
                 Console.WriteLine("Data: " + BitConverter.ToString(data));
@@ -437,12 +462,36 @@ namespace SimpleTcpRelay
                 case CommandType.SendToClient:
                     {
                         int toClientId= BitConverter.ToInt32(data, 5);
-                        byte channelId = data[6];
+                        byte channelId = data[9];
                         byte[] payload = new byte[data.Length - 10];
                         
                         Array.Copy(data, 10, payload, 0, payload.Length);
                         HandleSendToClient(toClientId, channelId, payload);
                     }break;
+                case CommandType.SendToMultipleClients:
+                    {
+                        using (MemoryStream ms = new MemoryStream(data))
+                        {
+                            ms.Seek(5, SeekOrigin.Begin);
+                            using (BinaryReader br = new BinaryReader(ms))
+                            {
+                                int clientCount = br.ReadInt32();
+                                int[] toClientIds = new int[clientCount];
+                                for (int i = 0; i < clientCount; i++)
+                                {
+                                    toClientIds[i] = br.ReadInt32();
+                                }
+
+                                byte channelId = br.ReadByte();
+                                byte[] payload = new byte[data.Length - (10+(clientCount*4))];
+
+                                Array.Copy(data, (10 + (clientCount * 4)), payload, 0, payload.Length);
+                                HandleSendToMultipleClients(toClientIds, channelId, payload);
+                            }
+                        }
+                    
+                    }
+                    break;
                 case CommandType.Disconnect:
                     {
                         HandleDisconnect();
