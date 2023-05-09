@@ -41,8 +41,6 @@ NetworkingManager.Singleton.GetComponent<SimpleTcpRelayTransport>().RoomIdToConn
 ```
 The RoomId is required when you start the NetworkingManager as client.
 
-The first room created has always the RoomId "0".
-
 # For Godot4
 Copy the script "SimpleRelayMultiplayerPeer.cs" into your Godot4 project.
 
