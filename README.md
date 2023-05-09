@@ -1,4 +1,4 @@
-# Simple-TCP-relay-server-for-MLAPI
+# Simple-TCP-relay-server-for-MLAPI-and-Godot4
 A simple TCP based relay server and transport for the Unity MLAPI networking library
 
 This relay server was tested with the MLAPI version 12.1.7 and Godot 4.0.2 (Mono version).
