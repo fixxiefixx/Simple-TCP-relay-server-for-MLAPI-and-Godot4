@@ -12,7 +12,8 @@ namespace SimpleTcpRelay
     {
 
         private const int RECEIVE_BUFFER_SIZE = 1024;
-
+        private const int PING_TIMEOUT = 5 * 1000;
+        private const int PING_TIMEOUT_WARNING = 25 * 1000;
         private TcpClient tcpClient;
         private Thread listenThread = null;
         private Thread sendThread = null;
@@ -50,7 +51,8 @@ namespace SimpleTcpRelay
             ListRooms,
             ListRoomsResponse,
             SetRoomVisible,//only From Host
-            SendToMultipleClients
+            SendToMultipleClients,
+            TimeoutWarning
         }
 
         public RelayClient(TcpClient tcpClient)
@@ -199,6 +201,10 @@ namespace SimpleTcpRelay
             SendPacket(BitConverter.GetBytes((byte)CommandType.Ping));
         }
 
+        private void SendTimeoutWarning()
+        {
+            SendPacket(BitConverter.GetBytes((byte)CommandType.TimeoutWarning));
+        }
 
 
         private void HandlePong()
@@ -258,17 +264,42 @@ namespace SimpleTcpRelay
             lock (Program.roomManager)
             {
                 RoomManager.Room room = Program.roomManager.GetRoom(ConnectedRoomId);
-                RelayClient targetClient = room.clients[toClientId];
-
-                using (MemoryStream ms = new MemoryStream())
+                if (toClientId == -1)
                 {
-                    using (BinaryWriter bw = new BinaryWriter(ms))
+                    foreach(RelayClient targetClient in room.clients.Values)
                     {
-                        bw.Write((byte)CommandType.ReceiveFromClient);
-                        bw.Write(ClientId);
-                        bw.Write(channelId);
-                        bw.Write(payload);
-                        targetClient.SendPacket(ms.ToArray());
+                        if (targetClient == this)
+                            continue;
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            using (BinaryWriter bw = new BinaryWriter(ms))
+                            {
+                                bw.Write((byte)CommandType.ReceiveFromClient);
+                                bw.Write(ClientId);
+                                bw.Write(channelId);
+                                bw.Write(payload);
+                                targetClient.SendPacket(ms.ToArray());
+                            }
+                        }
+
+                    }
+                }
+                else
+                {
+
+
+                    RelayClient targetClient = room.clients[toClientId];
+
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        using (BinaryWriter bw = new BinaryWriter(ms))
+                        {
+                            bw.Write((byte)CommandType.ReceiveFromClient);
+                            bw.Write(ClientId);
+                            bw.Write(channelId);
+                            bw.Write(payload);
+                            targetClient.SendPacket(ms.ToArray());
+                        }
                     }
                 }
             }
@@ -534,11 +565,16 @@ namespace SimpleTcpRelay
                 {
                     ponged = false;
                     SendPing();
-                    Thread.Sleep(5000);
+                    Thread.Sleep(PING_TIMEOUT);
                     if (!ponged)
                     {
-                        Console.WriteLine("Ping timeout for client " + ClientId);
-                        Stop();
+                        SendTimeoutWarning();
+                        Thread.Sleep(PING_TIMEOUT_WARNING);
+                        if (!ponged)
+                        {
+                            Console.WriteLine("Ping timeout for client " + ClientId);
+                            Stop();
+                        }
                     }
                 }
             }catch(Exception ex)
