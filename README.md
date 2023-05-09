@@ -62,7 +62,6 @@ SimpleRelayMultiplayerPeer mp = new SimpleRelayMultiplayerPeer();
 mp.IpAddress = "127.0.0.1"; //Here you can enter the Ip of your self hosted relay server
 mp.Port = 8765; //This is the standard port of the relay server
 mp.GameName = "ExampleGame"; //Here you can enter the name of your game. Only Clients that use this name can see your session.
-string roomId = null;
 mp.ListRooms(
        delegate (SimpleRelayMultiplayerPeer.RoomInfo[] roomInfos)
        {
