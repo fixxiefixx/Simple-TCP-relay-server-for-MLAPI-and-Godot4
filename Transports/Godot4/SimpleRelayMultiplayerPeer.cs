@@ -37,6 +37,7 @@ public partial class SimpleRelayMultiplayerPeer : MultiplayerPeerExtension
     private Queue<PacketScriptFromClient> receivedPacketScripts=new Queue<PacketScriptFromClient>();
     private volatile Action<RoomInfo[]> currentListRoomsCallback = null;
     private HashSet<int> connectedClients = new HashSet<int>();
+    private Queue<Action> actionsToSync = new Queue<Action>();
 
     private class PacketScriptFromClient
     {
@@ -226,7 +227,13 @@ public partial class SimpleRelayMultiplayerPeer : MultiplayerPeerExtension
     {
         GD.Print("HandleStartClientResponse clientId = " + clientId + " hostClientId = " + hostClientId);
         ClientId = clientId;
-        EmitSignal("peer_connected", 1);
+
+        lock (actionsToSync)
+        {
+            actionsToSync.Enqueue(new Action(() => {
+                EmitSignal("peer_connected", 1);
+            }));
+        }
     }
 
     private void HandleStartHostResponse(int clientId, int roomId)
@@ -263,7 +270,12 @@ public partial class SimpleRelayMultiplayerPeer : MultiplayerPeerExtension
                     int clientId=BitConverter.ToInt32(payload,1);
                     if (connectedClients.Add(clientId))
                     {
-                        EmitSignal("peer_connected", clientId + 1);
+                        lock (actionsToSync)
+                        {
+                            actionsToSync.Enqueue(new Action(() => {
+                                EmitSignal("peer_connected", clientId + 1);
+                            }));
+                        }
                     }
                 }break;
                 case SubCommandType.ClientDisconnected:
@@ -271,7 +283,12 @@ public partial class SimpleRelayMultiplayerPeer : MultiplayerPeerExtension
                     int clientId = BitConverter.ToInt32(payload, 1);
                     if (connectedClients.Contains(clientId))
                     {
-                        EmitSignal("peer_disconnected", clientId + 1);
+                        lock (actionsToSync)
+                        {
+                            actionsToSync.Enqueue(new Action(() => {
+                                EmitSignal("peer_disconnected", clientId + 1);
+                            }));
+                        }
                     }
                 }
                 break;
@@ -283,7 +300,13 @@ public partial class SimpleRelayMultiplayerPeer : MultiplayerPeerExtension
     private void HandleClientDisconnected(int remoteClientId)
     {
         GD.Print("HandleClientDisconnected remoteClientId = " + remoteClientId);
-        EmitSignal("peer_disconnected", remoteClientId + 1);
+        lock (actionsToSync)
+        {
+            actionsToSync.Enqueue(new Action(() => {
+                EmitSignal("peer_disconnected", remoteClientId + 1);
+            }));
+        }
+
         foreach (int clientToNotify in connectedClients)
         {
             SendSubCmdClientDisconnected(clientToNotify, remoteClientId);
@@ -308,7 +331,14 @@ public partial class SimpleRelayMultiplayerPeer : MultiplayerPeerExtension
     private void HandleClientConnected(int clientId)
     {
         GD.Print("HandleClientConnected remoteClientId = " + clientId);
-        EmitSignal("peer_connected", clientId + 1);
+
+        lock (actionsToSync)
+        {
+            actionsToSync.Enqueue(new Action(() => {
+                EmitSignal("peer_connected", clientId + 1);
+            }));
+        }
+        
         foreach(int clientToNotify in connectedClients)
         {
             SendSubCmdClientConnected(clientToNotify,clientId);
@@ -725,6 +755,14 @@ public partial class SimpleRelayMultiplayerPeer : MultiplayerPeerExtension
     //     Called when the Godot.MultiplayerApi is polled. See Godot.MultiplayerApi.Poll.
     public override void _Poll()
     {
+        lock (actionsToSync)
+        {
+            while(actionsToSync.Count > 0) 
+            { 
+                actionsToSync.Dequeue().Invoke(); 
+            }
+        }
+
         if (listRoomsAnswer != null && currentListRoomsCallback != null)
         {
             currentListRoomsCallback.Invoke(listRoomsAnswer);
